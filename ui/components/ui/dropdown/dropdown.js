@@ -1,15 +1,17 @@
 import React, { useCallback } from 'react';
 import PropTypes from 'prop-types';
 import classnames from 'classnames';
+import IconCaretDown from '../icon/icon-caret-down';
 
 const Dropdown = ({
   className,
   disabled = false,
   onChange,
   options,
-  selectedOption = null,
+  selectedOption = '',
   style,
   title,
+  'data-testid': dataTestId,
 }) => {
   const _onChange = useCallback(
     (event) => {
@@ -21,22 +23,26 @@ const Dropdown = ({
   );
 
   return (
-    <select
-      className={classnames('dropdown', className)}
-      disabled={disabled}
-      title={title}
-      onChange={_onChange}
-      style={style}
-      value={selectedOption}
-    >
-      {options.map((option) => {
-        return (
-          <option key={option.value} value={option.value}>
-            {option.name || option.value}
-          </option>
-        );
-      })}
-    </select>
+    <div className={classnames('dropdown', className)}>
+      <select
+        className="dropdown__select"
+        data-testid={dataTestId}
+        disabled={disabled}
+        title={title}
+        onChange={_onChange}
+        style={style}
+        value={selectedOption}
+      >
+        {options.map((option) => {
+          return (
+            <option key={option.value} value={option.value}>
+              {option.name || option.value}
+            </option>
+          );
+        })}
+      </select>
+      <IconCaretDown size={16} className="dropdown__icon-caret-down" />
+    </div>
   );
 };
 
@@ -74,6 +80,10 @@ Dropdown.propTypes = {
    * Add inline style for the component
    */
   style: PropTypes.object,
+  /**
+   * Unit testing test id
+   */
+  'data-testid': PropTypes.string,
 };
 
 export default Dropdown;

@@ -11,6 +11,10 @@ import useAddressDetails from '../../../../../hooks/useAddressDetails';
 import Identicon from '../../../../ui/identicon';
 import InfoTooltip from '../../../../ui/info-tooltip';
 import NicknamePopovers from '../../../modals/nickname-popovers';
+import Typography from '../../../../ui/typography';
+import { TYPOGRAPHY } from '../../../../../helpers/constants/design-system';
+import { ORIGIN_METAMASK } from '../../../../../../shared/constants/app';
+import SiteOrigin from '../../../../ui/site-origin';
 
 const ConfirmPageContainerSummary = (props) => {
   const {
@@ -36,10 +40,10 @@ const ConfirmPageContainerSummary = (props) => {
     TRANSACTION_TYPES.CONTRACT_INTERACTION,
     TRANSACTION_TYPES.TOKEN_METHOD_TRANSFER,
     TRANSACTION_TYPES.TOKEN_METHOD_TRANSFER_FROM,
+    TRANSACTION_TYPES.TOKEN_METHOD_SAFE_TRANSFER_FROM,
   ];
-  const isContractTypeTransaction = contractInitiatedTransactionType.includes(
-    transactionType,
-  );
+  const isContractTypeTransaction =
+    contractInitiatedTransactionType.includes(transactionType);
   let contractAddress;
   if (isContractTypeTransaction) {
     // If the transaction is TOKEN_METHOD_TRANSFER or TOKEN_METHOD_TRANSFER_FROM
@@ -47,7 +51,9 @@ const ConfirmPageContainerSummary = (props) => {
     // type of contract interaction it is passed as toAddress
     contractAddress =
       transactionType === TRANSACTION_TYPES.TOKEN_METHOD_TRANSFER ||
-      transactionType === TRANSACTION_TYPES.TOKEN_METHOD_TRANSFER_FROM
+      transactionType === TRANSACTION_TYPES.TOKEN_METHOD_TRANSFER_FROM ||
+      transactionType === TRANSACTION_TYPES.TOKEN_METHOD_SAFE_TRANSFER_FROM ||
+      transactionType === TRANSACTION_TYPES.TOKEN_METHOD_SET_APPROVAL_FOR_ALL
         ? tokenAddress
         : toAddress;
   }
@@ -79,8 +85,11 @@ const ConfirmPageContainerSummary = (props) => {
 
   return (
     <div className={classnames('confirm-page-container-summary', className)}>
-      {origin === 'metamask' ? null : (
-        <div className="confirm-page-container-summary__origin">{origin}</div>
+      {origin === ORIGIN_METAMASK ? null : (
+        <SiteOrigin
+          className="confirm-page-container-summary__origin"
+          siteOrigin={origin}
+        />
       )}
       <div className="confirm-page-container-summary__action-row">
         <div className="confirm-page-container-summary__action">
@@ -116,9 +125,15 @@ const ConfirmPageContainerSummary = (props) => {
         <div className="confirm-page-container-summary__title">
           {renderImage()}
           {!hideTitle ? (
-            <div className="confirm-page-container-summary__title-text">
+            <Typography
+              className="confirm-page-container-summary__title-text"
+              variant={
+                title && title.length < 10 ? TYPOGRAPHY.H1 : TYPOGRAPHY.H3
+              }
+              title={title}
+            >
               {titleComponent || title}
-            </div>
+            </Typography>
           ) : null}
         </div>
         {hideSubtitle ? null : (

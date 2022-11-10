@@ -1,19 +1,26 @@
-import React, { useState, useContext, useMemo, useEffect, useRef } from 'react';
+import React, {
+  useState,
+  useContext,
+  useMemo,
+  useEffect,
+  useRef,
+  useCallback,
+} from 'react';
 import { shallowEqual, useSelector, useDispatch } from 'react-redux';
 import { useHistory } from 'react-router-dom';
 import BigNumber from 'bignumber.js';
 import { isEqual } from 'lodash';
 import classnames from 'classnames';
+import { captureException } from '@sentry/browser';
+
 import { I18nContext } from '../../../contexts/i18n';
 import SelectQuotePopover from '../select-quote-popover';
 import { useEthFiatAmount } from '../../../hooks/useEthFiatAmount';
 import { useEqualityCheck } from '../../../hooks/useEqualityCheck';
-import { useNewMetricEvent } from '../../../hooks/useMetricEvent';
 import { usePrevious } from '../../../hooks/usePrevious';
 import { useGasFeeInputs } from '../../../hooks/gasFeeInput/useGasFeeInputs';
-import { MetaMetricsContext } from '../../../contexts/metametrics.new';
+import { MetaMetricsContext } from '../../../contexts/metametrics';
 import FeeCard from '../fee-card';
-import EditGasPopover from '../../../components/app/edit-gas-popover/edit-gas-popover.component';
 import {
   FALLBACK_GAS_MULTIPLIER,
   getQuotes,
@@ -37,13 +44,14 @@ import {
   getReviewSwapClickedTimestamp,
   getSmartTransactionsOptInStatus,
   signAndSendSwapsSmartTransaction,
-  getSwapsRefreshStates,
+  getSwapsNetworkConfig,
   getSmartTransactionsEnabled,
+  getSmartTransactionsError,
   getCurrentSmartTransactionsError,
   getCurrentSmartTransactionsErrorMessageDismissed,
   getSwapsSTXLoading,
-  estimateSwapsSmartTransactionsGas,
-  getSmartTransactionEstimatedGas,
+  fetchSwapsSmartTransactionFees,
+  getSmartTransactionFees,
 } from '../../../ducks/swaps/swaps';
 import {
   conversionRateSelector,
@@ -55,15 +63,10 @@ import {
   isHardwareWallet,
   getHardwareWalletType,
   checkNetworkAndAccountSupports1559,
-  getEIP1559V2Enabled,
+  getUSDConversionRate,
+  getIsMultiLayerFeeNetwork,
 } from '../../../selectors';
 import { getNativeCurrency, getTokens } from '../../../ducks/metamask/metamask';
-
-import {
-  toPrecisionWithoutTrailingZeros,
-  isEqualCaseInsensitive,
-} from '../../../helpers/utils/util';
-
 import {
   safeRefetchQuotes,
   setCustomApproveTxData,
@@ -71,6 +74,7 @@ import {
   showModal,
   setSwapsQuotesPollingLimitEnabled,
 } from '../../../store/actions';
+import { SET_SMART_TRANSACTIONS_ERROR } from '../../../store/actionConstants';
 import {
   ASSET_ROUTE,
   BUILD_QUOTE_ROUTE,
@@ -78,26 +82,12 @@ import {
   SWAPS_ERROR_ROUTE,
   AWAITING_SWAP_ROUTE,
 } from '../../../helpers/constants/routes';
-import { getTransactionData } from '../../../helpers/utils/transactions.util';
 import {
-  calcTokenAmount,
-  calcTokenValue,
-  getTokenValueParam,
-} from '../../../helpers/utils/token-util';
-import {
-  decimalToHex,
-  hexToDecimal,
-  getValueFromWeiHex,
   decGWEIToHexWEI,
-  hexWEIToDecGWEI,
   addHexes,
+  decWEIToDecETH,
 } from '../../../helpers/utils/conversions.util';
-import { GasFeeContextProvider } from '../../../contexts/gasFee';
-import { TransactionModalContextProvider } from '../../../contexts/transaction-modal';
-import AdvancedGasFeePopover from '../../../components/app/advanced-gas-fee-popover';
-import EditGasFeePopover from '../../../components/app/edit-gas-fee-popover';
 import MainQuoteSummary from '../main-quote-summary';
-import { calcGasTotal } from '../../send/send.utils';
 import { getCustomTxParamsData } from '../../confirm-approve/confirm-approve.util';
 import ActionableMessage from '../../../components/ui/actionable-message/actionable-message';
 import {
@@ -107,14 +97,25 @@ import {
 } from '../swaps.util';
 import { useTokenTracker } from '../../../hooks/useTokenTracker';
 import { QUOTES_EXPIRED_ERROR } from '../../../../shared/constants/swaps';
-import {
-  EDIT_GAS_MODES,
-  GAS_RECOMMENDATIONS,
-} from '../../../../shared/constants/gas';
+import { GAS_RECOMMENDATIONS } from '../../../../shared/constants/gas';
 import CountdownTimer from '../countdown-timer';
 import SwapsFooter from '../swaps-footer';
 import PulseLoader from '../../../components/ui/pulse-loader'; // TODO: Replace this with a different loading component.
 import Box from '../../../components/ui/box';
+import { EVENT } from '../../../../shared/constants/metametrics';
+import { isEqualCaseInsensitive } from '../../../../shared/modules/string-utils';
+import { parseStandardTokenTransactionData } from '../../../../shared/modules/transaction.utils';
+import { getTokenValueParam } from '../../../../shared/lib/metamask-controller-utils';
+import {
+  calcGasTotal,
+  calcTokenAmount,
+  decimalToHex,
+  hexWEIToDecGWEI,
+  toPrecisionWithoutTrailingZeros,
+} from '../../../../shared/lib/transactions-controller-utils';
+import { calcTokenValue } from '../../../../shared/lib/swaps-utils';
+import fetchEstimatedL1Fee from '../../../helpers/utils/optimism/fetchEstimatedL1Fee';
+import { sumHexes } from '../../../helpers/utils/transactions.util';
 import ViewQuotePriceDifference from './view-quote-price-difference';
 
 let intervalId;
@@ -123,22 +124,19 @@ export default function ViewQuote() {
   const history = useHistory();
   const dispatch = useDispatch();
   const t = useContext(I18nContext);
-  const metaMetricsEvent = useContext(MetaMetricsContext);
-  const eip1559V2Enabled = useSelector(getEIP1559V2Enabled);
+  const trackEvent = useContext(MetaMetricsContext);
 
   const [dispatchedSafeRefetch, setDispatchedSafeRefetch] = useState(false);
   const [submitClicked, setSubmitClicked] = useState(false);
   const [selectQuotePopoverShown, setSelectQuotePopoverShown] = useState(false);
   const [warningHidden, setWarningHidden] = useState(false);
   const [originalApproveAmount, setOriginalApproveAmount] = useState(null);
-  const [showEditGasPopover, setShowEditGasPopover] = useState(false);
+  const [multiLayerL1FeeTotal, setMultiLayerL1FeeTotal] = useState(null);
   // We need to have currentTimestamp in state, otherwise it would change with each rerender.
   const [currentTimestamp] = useState(Date.now());
 
-  const [
-    acknowledgedPriceDifference,
-    setAcknowledgedPriceDifference,
-  ] = useState(false);
+  const [acknowledgedPriceDifference, setAcknowledgedPriceDifference] =
+    useState(false);
   const priceDifferenceRiskyBuckets = [
     GAS_RECOMMENDATIONS.HIGH,
     GAS_RECOMMENDATIONS.MEDIUM,
@@ -166,6 +164,8 @@ export default function ViewQuote() {
   const memoizedTokenConversionRates = useEqualityCheck(tokenConversionRates);
   const { balance: ethBalance } = useSelector(getSelectedAccount, shallowEqual);
   const conversionRate = useSelector(conversionRateSelector);
+  const USDConversionRate = useSelector(getUSDConversionRate);
+  const isMultiLayerFeeNetwork = useSelector(getIsMultiLayerFeeNetwork);
   const currentCurrency = useSelector(getCurrentCurrency);
   const swapsTokens = useSelector(getTokens, isEqual);
   const networkAndAccountSupports1559 = useSelector(
@@ -191,6 +191,7 @@ export default function ViewQuote() {
   const currentSmartTransactionsError = useSelector(
     getCurrentSmartTransactionsError,
   );
+  const smartTransactionsError = useSelector(getSmartTransactionsError);
   const currentSmartTransactionsErrorMessageDismissed = useSelector(
     getCurrentSmartTransactionsErrorMessageDismissed,
   );
@@ -201,45 +202,9 @@ export default function ViewQuote() {
       (currentSmartTransactionsError !== 'not_enough_funds' ||
         currentSmartTransactionsErrorMessageDismissed)
     );
-  const smartTransactionEstimatedGas = useSelector(
-    getSmartTransactionEstimatedGas,
-  );
-  const swapsRefreshRates = useSelector(getSwapsRefreshStates);
+  const smartTransactionFees = useSelector(getSmartTransactionFees, isEqual);
+  const swapsNetworkConfig = useSelector(getSwapsNetworkConfig, shallowEqual);
   const unsignedTransaction = usedQuote.trade;
-
-  useEffect(() => {
-    if (currentSmartTransactionsEnabled && smartTransactionsOptInStatus) {
-      const unsignedTx = {
-        from: unsignedTransaction.from,
-        to: unsignedTransaction.to,
-        value: unsignedTransaction.value,
-        data: unsignedTransaction.data,
-        gas: unsignedTransaction.gas,
-        chainId,
-      };
-      intervalId = setInterval(() => {
-        dispatch(
-          estimateSwapsSmartTransactionsGas(unsignedTx, approveTxParams),
-        );
-      }, swapsRefreshRates.stxGetTransactionsRefreshTime);
-      dispatch(estimateSwapsSmartTransactionsGas(unsignedTx, approveTxParams));
-    } else if (intervalId) {
-      clearInterval(intervalId);
-    }
-    return () => clearInterval(intervalId);
-    // eslint-disable-next-line
-  }, [
-    dispatch,
-    currentSmartTransactionsEnabled,
-    smartTransactionsOptInStatus,
-    unsignedTransaction.data,
-    unsignedTransaction.from,
-    unsignedTransaction.value,
-    unsignedTransaction.gas,
-    unsignedTransaction.to,
-    chainId,
-    swapsRefreshRates.stxGetTransactionsRefreshTime,
-  ]);
 
   let gasFeeInputs;
   if (networkAndAccountSupports1559) {
@@ -253,6 +218,17 @@ export default function ViewQuote() {
   const { isBestQuote } = usedQuote;
 
   const fetchParamsSourceToken = fetchParams?.sourceToken;
+
+  const additionalTrackingParams = {
+    reg_tx_fee_in_usd: undefined,
+    reg_tx_fee_in_eth: undefined,
+    reg_tx_max_fee_in_usd: undefined,
+    reg_tx_max_fee_in_eth: undefined,
+    stx_fee_in_usd: undefined,
+    stx_fee_in_eth: undefined,
+    stx_max_fee_in_usd: undefined,
+    stx_max_fee_in_eth: undefined,
+  };
 
   const usedGasLimit =
     usedQuote?.gasEstimateWithRefund ||
@@ -268,7 +244,7 @@ export default function ViewQuote() {
   const nonCustomMaxGasLimit = usedQuote?.gasEstimate
     ? usedGasLimitWithMultiplier
     : `0x${decimalToHex(usedQuote?.maxGas || 0)}`;
-  let maxGasLimit = customMaxGas || nonCustomMaxGasLimit;
+  const maxGasLimit = customMaxGas || nonCustomMaxGasLimit;
 
   let maxFeePerGas;
   let maxPriorityFeePerGas;
@@ -290,19 +266,13 @@ export default function ViewQuote() {
       maxPriorityFeePerGas,
     );
   }
-
-  // Smart Transactions gas fees.
-  if (
-    currentSmartTransactionsEnabled &&
-    smartTransactionsOptInStatus &&
-    smartTransactionEstimatedGas?.txData
-  ) {
-    maxGasLimit = `0x${decimalToHex(
-      smartTransactionEstimatedGas?.txData.gasLimit || 0,
-    )}`;
+  let gasTotalInWeiHex = calcGasTotal(maxGasLimit, maxFeePerGas || gasPrice);
+  if (multiLayerL1FeeTotal !== null) {
+    gasTotalInWeiHex = sumHexes(
+      gasTotalInWeiHex || '0x0',
+      multiLayerL1FeeTotal || '0x0',
+    );
   }
-
-  const gasTotalInWeiHex = calcGasTotal(maxGasLimit, maxFeePerGas || gasPrice);
 
   const { tokensWithBalances } = useTokenTracker(swapsTokens, true);
   const balanceToken =
@@ -322,7 +292,7 @@ export default function ViewQuote() {
   const tokenBalanceUnavailable =
     tokensWithBalances && balanceToken === undefined;
 
-  const approveData = getTransactionData(approveTxParams?.data);
+  const approveData = parseStandardTokenTransactionData(approveTxParams?.data);
   const approveValue = approveData && getTokenValueParam(approveData);
   const approveAmount =
     approveValue &&
@@ -341,8 +311,9 @@ export default function ViewQuote() {
       chainId,
       smartTransactionsEnabled &&
         smartTransactionsOptInStatus &&
-        smartTransactionEstimatedGas?.txData,
+        smartTransactionFees?.tradeTxFees,
       nativeCurrencySymbol,
+      multiLayerL1FeeTotal,
     );
   }, [
     quotes,
@@ -354,10 +325,11 @@ export default function ViewQuote() {
     approveGas,
     memoizedTokenConversionRates,
     chainId,
-    smartTransactionEstimatedGas?.txData,
+    smartTransactionFees?.tradeTxFees,
     nativeCurrencySymbol,
     smartTransactionsEnabled,
     smartTransactionsOptInStatus,
+    multiLayerL1FeeTotal,
   ]);
 
   const renderableDataForUsedQuote = renderablePopoverData.find(
@@ -376,20 +348,25 @@ export default function ViewQuote() {
     sourceTokenIconUrl,
   } = renderableDataForUsedQuote;
 
-  let { feeInFiat, feeInEth } = getRenderableNetworkFeesForQuote({
-    tradeGas: usedGasLimit,
-    approveGas,
-    gasPrice: networkAndAccountSupports1559
-      ? baseAndPriorityFeePerGas
-      : gasPrice,
-    currentCurrency,
-    conversionRate,
-    tradeValue,
-    sourceSymbol: sourceTokenSymbol,
-    sourceAmount: usedQuote.sourceAmount,
-    chainId,
-    nativeCurrencySymbol,
-  });
+  let { feeInFiat, feeInEth, rawEthFee, feeInUsd } =
+    getRenderableNetworkFeesForQuote({
+      tradeGas: usedGasLimit,
+      approveGas,
+      gasPrice: networkAndAccountSupports1559
+        ? baseAndPriorityFeePerGas
+        : gasPrice,
+      currentCurrency,
+      conversionRate,
+      USDConversionRate,
+      tradeValue,
+      sourceSymbol: sourceTokenSymbol,
+      sourceAmount: usedQuote.sourceAmount,
+      chainId,
+      nativeCurrencySymbol,
+      multiLayerL1FeeTotal,
+    });
+  additionalTrackingParams.reg_tx_fee_in_usd = Number(feeInUsd);
+  additionalTrackingParams.reg_tx_fee_in_eth = Number(rawEthFee);
 
   const renderableMaxFees = getRenderableNetworkFeesForQuote({
     tradeGas: maxGasLimit,
@@ -397,41 +374,60 @@ export default function ViewQuote() {
     gasPrice: maxFeePerGas || gasPrice,
     currentCurrency,
     conversionRate,
+    USDConversionRate,
     tradeValue,
     sourceSymbol: sourceTokenSymbol,
     sourceAmount: usedQuote.sourceAmount,
     chainId,
     nativeCurrencySymbol,
+    multiLayerL1FeeTotal,
   });
-  let { feeInFiat: maxFeeInFiat, feeInEth: maxFeeInEth } = renderableMaxFees;
-  const { nonGasFee } = renderableMaxFees;
+  let {
+    feeInFiat: maxFeeInFiat,
+    feeInEth: maxFeeInEth,
+    rawEthFee: maxRawEthFee,
+    feeInUsd: maxFeeInUsd,
+  } = renderableMaxFees;
+  additionalTrackingParams.reg_tx_max_fee_in_usd = Number(maxFeeInUsd);
+  additionalTrackingParams.reg_tx_max_fee_in_eth = Number(maxRawEthFee);
 
   if (
     currentSmartTransactionsEnabled &&
     smartTransactionsOptInStatus &&
-    smartTransactionEstimatedGas?.txData
+    smartTransactionFees?.tradeTxFees
   ) {
     const stxEstimatedFeeInWeiDec =
-      smartTransactionEstimatedGas.txData.feeEstimate +
-      (smartTransactionEstimatedGas.approvalTxData?.feeEstimate || 0);
-    const stxMaxFeeInWeiDec = stxEstimatedFeeInWeiDec * 2;
-    ({ feeInFiat, feeInEth } = getFeeForSmartTransaction({
+      smartTransactionFees?.tradeTxFees.feeEstimate +
+      (smartTransactionFees?.approvalTxFees?.feeEstimate || 0);
+    const stxMaxFeeInWeiDec =
+      stxEstimatedFeeInWeiDec * swapsNetworkConfig.stxMaxFeeMultiplier;
+    ({ feeInFiat, feeInEth, rawEthFee, feeInUsd } = getFeeForSmartTransaction({
       chainId,
       currentCurrency,
       conversionRate,
+      USDConversionRate,
       nativeCurrencySymbol,
       feeInWeiDec: stxEstimatedFeeInWeiDec,
     }));
+    additionalTrackingParams.stx_fee_in_usd = Number(feeInUsd);
+    additionalTrackingParams.stx_fee_in_eth = Number(rawEthFee);
+    additionalTrackingParams.estimated_gas =
+      smartTransactionFees?.tradeTxFees.gasLimit;
     ({
       feeInFiat: maxFeeInFiat,
       feeInEth: maxFeeInEth,
+      rawEthFee: maxRawEthFee,
+      feeInUsd: maxFeeInUsd,
     } = getFeeForSmartTransaction({
       chainId,
       currentCurrency,
       conversionRate,
+      USDConversionRate,
       nativeCurrencySymbol,
       feeInWeiDec: stxMaxFeeInWeiDec,
     }));
+    additionalTrackingParams.stx_max_fee_in_usd = Number(maxFeeInUsd);
+    additionalTrackingParams.stx_max_fee_in_eth = Number(maxRawEthFee);
   }
 
   const tokenCost = new BigNumber(usedQuote.sourceAmount);
@@ -464,15 +460,35 @@ export default function ViewQuote() {
       )
     : null;
 
-  const destinationToken = useSelector(getDestinationTokenInfo, isEqual);
+  let ethBalanceNeededStx;
+  if (smartTransactionsError?.balanceNeededWei) {
+    ethBalanceNeededStx = decWEIToDecETH(
+      smartTransactionsError.balanceNeededWei -
+        smartTransactionsError.currentBalanceWei,
+    );
+  }
 
+  const destinationToken = useSelector(getDestinationTokenInfo, isEqual);
   useEffect(() => {
-    if (insufficientTokens || insufficientEth) {
+    if (currentSmartTransactionsEnabled && smartTransactionsOptInStatus) {
+      if (insufficientTokens) {
+        dispatch(setBalanceError(true));
+      } else if (balanceError && !insufficientTokens) {
+        dispatch(setBalanceError(false));
+      }
+    } else if (insufficientTokens || insufficientEth) {
       dispatch(setBalanceError(true));
     } else if (balanceError && !insufficientTokens && !insufficientEth) {
       dispatch(setBalanceError(false));
     }
-  }, [insufficientTokens, insufficientEth, balanceError, dispatch]);
+  }, [
+    insufficientTokens,
+    insufficientEth,
+    balanceError,
+    dispatch,
+    currentSmartTransactionsEnabled,
+    smartTransactionsOptInStatus,
+  ]);
 
   useEffect(() => {
     const currentTime = Date.now();
@@ -501,84 +517,130 @@ export default function ViewQuote() {
     }
   }, [originalApproveAmount, approveAmount]);
 
+  // If it's not a Smart Transaction and ETH balance is needed, we want to show a warning.
+  const isNotStxAndEthBalanceIsNeeded =
+    (!currentSmartTransactionsEnabled || !smartTransactionsOptInStatus) &&
+    ethBalanceNeeded;
+
+  // If it's a Smart Transaction and ETH balance is needed, we want to show a warning.
+  const isStxAndEthBalanceIsNeeded =
+    currentSmartTransactionsEnabled &&
+    smartTransactionsOptInStatus &&
+    ethBalanceNeededStx;
+
+  // Indicates if we should show to a user a warning about insufficient funds for swapping.
   const showInsufficientWarning =
-    (balanceError || tokenBalanceNeeded || ethBalanceNeeded) && !warningHidden;
+    (balanceError ||
+      tokenBalanceNeeded ||
+      isNotStxAndEthBalanceIsNeeded ||
+      isStxAndEthBalanceIsNeeded) &&
+    !warningHidden;
 
   const hardwareWalletUsed = useSelector(isHardwareWallet);
   const hardwareWalletType = useSelector(getHardwareWalletType);
 
   const numberOfQuotes = Object.values(quotes).length;
   const bestQuoteReviewedEventSent = useRef();
-  const eventObjectBase = {
-    token_from: sourceTokenSymbol,
-    token_from_amount: sourceTokenValue,
-    token_to: destinationTokenSymbol,
-    token_to_amount: destinationTokenValue,
-    request_type: fetchParams?.balanceError,
-    slippage: fetchParams?.slippage,
-    custom_slippage: fetchParams?.slippage !== 2,
-    response_time: fetchParams?.responseTime,
-    best_quote_source: topQuote?.aggregator,
-    available_quotes: numberOfQuotes,
-    is_hardware_wallet: hardwareWalletUsed,
-    hardware_wallet_type: hardwareWalletType,
-    stx_enabled: currentSmartTransactionsEnabled,
-    current_stx_enabled: currentSmartTransactionsEnabled,
-    stx_user_opt_in: smartTransactionsOptInStatus,
+  const eventObjectBase = useMemo(() => {
+    return {
+      token_from: sourceTokenSymbol,
+      token_from_amount: sourceTokenValue,
+      token_to: destinationTokenSymbol,
+      token_to_amount: destinationTokenValue,
+      request_type: fetchParams?.balanceError,
+      slippage: fetchParams?.slippage,
+      custom_slippage: fetchParams?.slippage !== 2,
+      response_time: fetchParams?.responseTime,
+      best_quote_source: topQuote?.aggregator,
+      available_quotes: numberOfQuotes,
+      is_hardware_wallet: hardwareWalletUsed,
+      hardware_wallet_type: hardwareWalletType,
+      stx_enabled: smartTransactionsEnabled,
+      current_stx_enabled: currentSmartTransactionsEnabled,
+      stx_user_opt_in: smartTransactionsOptInStatus,
+    };
+  }, [
+    sourceTokenSymbol,
+    sourceTokenValue,
+    destinationTokenSymbol,
+    destinationTokenValue,
+    fetchParams?.balanceError,
+    fetchParams?.slippage,
+    fetchParams?.responseTime,
+    topQuote?.aggregator,
+    numberOfQuotes,
+    hardwareWalletUsed,
+    hardwareWalletType,
+    smartTransactionsEnabled,
+    currentSmartTransactionsEnabled,
+    smartTransactionsOptInStatus,
+  ]);
+
+  const trackAllAvailableQuotesOpened = () => {
+    trackEvent({
+      event: 'All Available Quotes Opened',
+      category: EVENT.CATEGORIES.SWAPS,
+      sensitiveProperties: {
+        ...eventObjectBase,
+        other_quote_selected: usedQuote?.aggregator !== topQuote?.aggregator,
+        other_quote_selected_source:
+          usedQuote?.aggregator === topQuote?.aggregator
+            ? null
+            : usedQuote?.aggregator,
+      },
+    });
   };
-
-  const allAvailableQuotesOpened = useNewMetricEvent({
-    event: 'All Available Quotes Opened',
-    category: 'swaps',
-    sensitiveProperties: {
-      ...eventObjectBase,
-      other_quote_selected: usedQuote?.aggregator !== topQuote?.aggregator,
-      other_quote_selected_source:
-        usedQuote?.aggregator === topQuote?.aggregator
-          ? null
-          : usedQuote?.aggregator,
-    },
-  });
-  const quoteDetailsOpened = useNewMetricEvent({
-    event: 'Quote Details Opened',
-    category: 'swaps',
-    sensitiveProperties: {
-      ...eventObjectBase,
-      other_quote_selected: usedQuote?.aggregator !== topQuote?.aggregator,
-      other_quote_selected_source:
-        usedQuote?.aggregator === topQuote?.aggregator
-          ? null
-          : usedQuote?.aggregator,
-    },
-  });
-  const editSpendLimitOpened = useNewMetricEvent({
-    event: 'Edit Spend Limit Opened',
-    category: 'swaps',
-    sensitiveProperties: {
-      ...eventObjectBase,
-      custom_spend_limit_set: originalApproveAmount === approveAmount,
-      custom_spend_limit_amount:
-        originalApproveAmount === approveAmount ? null : approveAmount,
-    },
-  });
-
-  const bestQuoteReviewedEvent = useNewMetricEvent({
-    event: 'Best Quote Reviewed',
-    category: 'swaps',
-    sensitiveProperties: {
-      ...eventObjectBase,
-      network_fees: feeInFiat,
-    },
-  });
-
-  const viewQuotePageLoadedEvent = useNewMetricEvent({
-    event: 'View Quote Page Loaded',
-    category: 'swaps',
-    sensitiveProperties: {
-      ...eventObjectBase,
-      response_time: currentTimestamp - reviewSwapClickedTimestamp,
-    },
-  });
+  const trackQuoteDetailsOpened = () => {
+    trackEvent({
+      event: 'Quote Details Opened',
+      category: EVENT.CATEGORIES.SWAPS,
+      sensitiveProperties: {
+        ...eventObjectBase,
+        other_quote_selected: usedQuote?.aggregator !== topQuote?.aggregator,
+        other_quote_selected_source:
+          usedQuote?.aggregator === topQuote?.aggregator
+            ? null
+            : usedQuote?.aggregator,
+      },
+    });
+  };
+  const trackEditSpendLimitOpened = () => {
+    trackEvent({
+      event: 'Edit Spend Limit Opened',
+      category: EVENT.CATEGORIES.SWAPS,
+      sensitiveProperties: {
+        ...eventObjectBase,
+        custom_spend_limit_set: originalApproveAmount === approveAmount,
+        custom_spend_limit_amount:
+          originalApproveAmount === approveAmount ? null : approveAmount,
+      },
+    });
+  };
+  const trackBestQuoteReviewedEvent = useCallback(() => {
+    trackEvent({
+      event: 'Best Quote Reviewed',
+      category: EVENT.CATEGORIES.SWAPS,
+      sensitiveProperties: {
+        ...eventObjectBase,
+        network_fees: feeInFiat,
+      },
+    });
+  }, [trackEvent, eventObjectBase, feeInFiat]);
+  const trackViewQuotePageLoadedEvent = useCallback(() => {
+    trackEvent({
+      event: 'View Quote Page Loaded',
+      category: EVENT.CATEGORIES.SWAPS,
+      sensitiveProperties: {
+        ...eventObjectBase,
+        response_time: currentTimestamp - reviewSwapClickedTimestamp,
+      },
+    });
+  }, [
+    trackEvent,
+    eventObjectBase,
+    currentTimestamp,
+    reviewSwapClickedTimestamp,
+  ]);
 
   useEffect(() => {
     if (
@@ -595,24 +657,25 @@ export default function ViewQuote() {
       ].every((dep) => dep !== null && dep !== undefined)
     ) {
       bestQuoteReviewedEventSent.current = true;
-      bestQuoteReviewedEvent();
+      trackBestQuoteReviewedEvent();
     }
   }, [
-    sourceTokenSymbol,
-    sourceTokenValue,
-    destinationTokenSymbol,
-    destinationTokenValue,
     fetchParams,
     topQuote,
     numberOfQuotes,
     feeInFiat,
-    bestQuoteReviewedEvent,
+    destinationTokenSymbol,
+    destinationTokenValue,
+    sourceTokenSymbol,
+    sourceTokenValue,
+    trackBestQuoteReviewedEvent,
   ]);
 
   const metaMaskFee = usedQuote.fee;
 
+  /* istanbul ignore next */
   const onFeeCardTokenApprovalClick = () => {
-    editSpendLimitOpened();
+    trackEditSpendLimitOpened();
     dispatch(
       showModal({
         name: 'EDIT_APPROVAL_PERMISSION',
@@ -647,59 +710,11 @@ export default function ViewQuote() {
       }),
     );
   };
-
-  const nonGasFeeIsPositive = new BigNumber(nonGasFee, 16).gt(0);
-  const approveGasTotal = calcGasTotal(
-    approveGas || '0x0',
-    networkAndAccountSupports1559 ? baseAndPriorityFeePerGas : gasPrice,
-  );
-  const extraNetworkFeeTotalInHexWEI = new BigNumber(nonGasFee, 16)
-    .plus(approveGasTotal, 16)
-    .toString(16);
-  const extraNetworkFeeTotalInEth = getValueFromWeiHex({
-    value: extraNetworkFeeTotalInHexWEI,
-    toDenomination: 'ETH',
-    numberOfDecimals: 4,
-  });
-
-  let extraInfoRowLabel = '';
-  if (approveGas && nonGasFeeIsPositive) {
-    extraInfoRowLabel = t('approvalAndAggregatorTxFeeCost');
-  } else if (approveGas) {
-    extraInfoRowLabel = t('approvalTxGasCost');
-  } else if (nonGasFeeIsPositive) {
-    extraInfoRowLabel = t('aggregatorFeeCost');
-  }
-
-  const onFeeCardMaxRowClick = () => {
-    networkAndAccountSupports1559
-      ? setShowEditGasPopover(true)
-      : dispatch(
-          showModal({
-            name: 'CUSTOMIZE_METASWAP_GAS',
-            value: tradeValue,
-            customGasLimitMessage: approveGas
-              ? t('extraApprovalGas', [hexToDecimal(approveGas)])
-              : '',
-            customTotalSupplement: approveGasTotal,
-            extraInfoRow: extraInfoRowLabel
-              ? {
-                  label: extraInfoRowLabel,
-                  value: `${extraNetworkFeeTotalInEth} ${nativeCurrencySymbol}`,
-                }
-              : null,
-            initialGasPrice: gasPrice,
-            initialGasLimit: maxGasLimit,
-            minimumGasLimit: new BigNumber(nonCustomMaxGasLimit, 16).toNumber(),
-          }),
-        );
-  };
-
   const actionableBalanceErrorMessage = tokenBalanceUnavailable
     ? t('swapTokenBalanceUnavailable', [sourceTokenSymbol])
     : t('swapApproveNeedMoreTokens', [
         <span key="swapApproveNeedMoreTokens-1" className="view-quote__bold">
-          {tokenBalanceNeeded || ethBalanceNeeded}
+          {tokenBalanceNeeded || ethBalanceNeededStx || ethBalanceNeeded}
         </span>,
         tokenBalanceNeeded && !(sourceTokenSymbol === defaultSwapsToken.symbol)
           ? sourceTokenSymbol
@@ -740,7 +755,7 @@ export default function ViewQuote() {
   const priceSlippageUnknownFiatValue =
     !priceSlippageFromSource ||
     !priceSlippageFromDestination ||
-    usedQuote?.priceSlippage?.calculationError;
+    Boolean(usedQuote?.priceSlippage?.calculationError);
 
   let priceDifferencePercentage = 0;
   if (usedQuote?.priceSlippage?.ratio) {
@@ -784,17 +799,80 @@ export default function ViewQuote() {
   const isShowingWarning =
     showInsufficientWarning || shouldShowPriceDifferenceWarning;
 
-  const onCloseEditGasPopover = () => {
-    setShowEditGasPopover(false);
-  };
+  const isSwapButtonDisabled = Boolean(
+    submitClicked ||
+      balanceError ||
+      tokenBalanceUnavailable ||
+      disableSubmissionDueToPriceWarning ||
+      (networkAndAccountSupports1559 &&
+        baseAndPriorityFeePerGas === undefined) ||
+      (!networkAndAccountSupports1559 &&
+        (gasPrice === null || gasPrice === undefined)) ||
+      (currentSmartTransactionsEnabled &&
+        (currentSmartTransactionsError || smartTransactionsError)) ||
+      (currentSmartTransactionsEnabled &&
+        smartTransactionsOptInStatus &&
+        !smartTransactionFees?.tradeTxFees),
+  );
+
+  useEffect(() => {
+    if (
+      currentSmartTransactionsEnabled &&
+      smartTransactionsOptInStatus &&
+      !insufficientTokens
+    ) {
+      const unsignedTx = {
+        from: unsignedTransaction.from,
+        to: unsignedTransaction.to,
+        value: unsignedTransaction.value,
+        data: unsignedTransaction.data,
+        gas: unsignedTransaction.gas,
+        chainId,
+      };
+      intervalId = setInterval(() => {
+        if (!swapsSTXLoading) {
+          dispatch(
+            fetchSwapsSmartTransactionFees({
+              unsignedTransaction: unsignedTx,
+              approveTxParams,
+              fallbackOnNotEnoughFunds: false,
+            }),
+          );
+        }
+      }, swapsNetworkConfig.stxGetTransactionsRefreshTime);
+      dispatch(
+        fetchSwapsSmartTransactionFees({
+          unsignedTransaction: unsignedTx,
+          approveTxParams,
+          fallbackOnNotEnoughFunds: false,
+        }),
+      );
+    } else if (intervalId) {
+      clearInterval(intervalId);
+    }
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line
+  }, [
+    dispatch,
+    currentSmartTransactionsEnabled,
+    smartTransactionsOptInStatus,
+    unsignedTransaction.data,
+    unsignedTransaction.from,
+    unsignedTransaction.value,
+    unsignedTransaction.gas,
+    unsignedTransaction.to,
+    chainId,
+    swapsNetworkConfig.stxGetTransactionsRefreshTime,
+    insufficientTokens,
+  ]);
 
   useEffect(() => {
     // Thanks to the next line we will only do quotes polling 3 times before showing a Quote Timeout modal.
     dispatch(setSwapsQuotesPollingLimitEnabled(true));
     if (reviewSwapClickedTimestamp) {
-      viewQuotePageLoadedEvent();
+      trackViewQuotePageLoadedEvent();
     }
-  }, [dispatch, viewQuotePageLoadedEvent, reviewSwapClickedTimestamp]);
+  }, [dispatch, trackViewQuotePageLoadedEvent, reviewSwapClickedTimestamp]);
 
   useEffect(() => {
     // if smart transaction error is turned off, reset submit clicked boolean
@@ -811,199 +889,191 @@ export default function ViewQuote() {
     submitClicked,
   ]);
 
-  const transaction = {
-    userFeeLevel: swapsUserFeeLevel || GAS_RECOMMENDATIONS.HIGH,
-    txParams: {
-      maxFeePerGas,
-      maxPriorityFeePerGas,
-      gas: maxGasLimit,
-    },
-  };
+  useEffect(() => {
+    if (!isMultiLayerFeeNetwork) {
+      return;
+    }
+    const getEstimatedL1Fee = async () => {
+      try {
+        const result = await fetchEstimatedL1Fee(global.eth, {
+          txParams: unsignedTransaction,
+          chainId,
+        });
+        setMultiLayerL1FeeTotal(result);
+      } catch (e) {
+        captureException(e);
+        setMultiLayerL1FeeTotal(null);
+      }
+    };
+    getEstimatedL1Fee();
+  }, [unsignedTransaction, isMultiLayerFeeNetwork, chainId]);
 
-  const supportsEIP1559V2 = eip1559V2Enabled && networkAndAccountSupports1559;
+  useEffect(() => {
+    if (currentSmartTransactionsEnabled && smartTransactionsOptInStatus) {
+      // Removes a smart transactions error when the component loads.
+      dispatch({
+        type: SET_SMART_TRANSACTIONS_ERROR,
+        payload: null,
+      });
+    }
+  }, [currentSmartTransactionsEnabled, smartTransactionsOptInStatus, dispatch]);
 
   return (
-    <GasFeeContextProvider
-      editGasMode={EDIT_GAS_MODES.SWAPS}
-      minimumGasLimit={usedGasLimit}
-      transaction={transaction}
-    >
-      <TransactionModalContextProvider>
-        <div className="view-quote">
-          <div
-            className={classnames('view-quote__content', {
-              'view-quote__content_modal': disableSubmissionDueToPriceWarning,
-            })}
-          >
-            {selectQuotePopoverShown && (
-              <SelectQuotePopover
-                quoteDataRows={renderablePopoverData}
-                onClose={() => setSelectQuotePopoverShown(false)}
-                onSubmit={(aggId) => dispatch(swapsQuoteSelected(aggId))}
-                swapToSymbol={destinationTokenSymbol}
-                initialAggId={usedQuote.aggregator}
-                onQuoteDetailsIsOpened={quoteDetailsOpened}
-                hideEstimatedGasFee={
-                  smartTransactionsEnabled && smartTransactionsOptInStatus
-                }
-              />
-            )}
-
-            {!supportsEIP1559V2 &&
-              showEditGasPopover &&
-              networkAndAccountSupports1559 && (
-                <EditGasPopover
-                  transaction={transaction}
-                  minimumGasLimit={usedGasLimit}
-                  defaultEstimateToUse={GAS_RECOMMENDATIONS.HIGH}
-                  mode={EDIT_GAS_MODES.SWAPS}
-                  confirmButtonText={t('submit')}
-                  onClose={onCloseEditGasPopover}
-                />
-              )}
-            {supportsEIP1559V2 && (
-              <>
-                <EditGasFeePopover />
-                <AdvancedGasFeePopover />
-              </>
-            )}
-
-            <div
-              className={classnames('view-quote__warning-wrapper', {
-                'view-quote__warning-wrapper--thin': !isShowingWarning,
-              })}
-            >
-              {viewQuotePriceDifferenceComponent}
-              {(showInsufficientWarning || tokenBalanceUnavailable) && (
-                <ActionableMessage
-                  message={actionableBalanceErrorMessage}
-                  onClose={() => setWarningHidden(true)}
-                />
-              )}
-            </div>
-            <div className="view-quote__countdown-timer-container">
-              <CountdownTimer
-                timeStarted={quotesLastFetched}
-                warningTime="0:30"
-                labelKey="swapNewQuoteIn"
-              />
-            </div>
-            <MainQuoteSummary
-              sourceValue={calcTokenValue(
-                sourceTokenValue,
-                sourceTokenDecimals,
-              )}
-              sourceDecimals={sourceTokenDecimals}
-              sourceSymbol={sourceTokenSymbol}
-              destinationValue={calcTokenValue(
-                destinationTokenValue,
-                destinationTokenDecimals,
-              )}
-              destinationDecimals={destinationTokenDecimals}
-              destinationSymbol={destinationTokenSymbol}
-              sourceIconUrl={sourceTokenIconUrl}
-              destinationIconUrl={destinationIconUrl}
-            />
-            {currentSmartTransactionsEnabled &&
-              smartTransactionsOptInStatus &&
-              !smartTransactionEstimatedGas?.txData && (
-                <Box marginTop={0} marginBottom={10}>
-                  <PulseLoader />
-                </Box>
-              )}
-            {(!currentSmartTransactionsEnabled ||
-              !smartTransactionsOptInStatus ||
-              smartTransactionEstimatedGas?.txData) && (
-              <div
-                className={classnames('view-quote__fee-card-container', {
-                  'view-quote__fee-card-container--three-rows':
-                    approveTxParams && (!balanceError || warningHidden),
-                })}
-              >
-                <FeeCard
-                  primaryFee={{
-                    fee: feeInEth,
-                    maxFee: maxFeeInEth,
-                  }}
-                  secondaryFee={{
-                    fee: feeInFiat,
-                    maxFee: maxFeeInFiat,
-                  }}
-                  onFeeCardMaxRowClick={onFeeCardMaxRowClick}
-                  hideTokenApprovalRow={
-                    !approveTxParams || (balanceError && !warningHidden)
-                  }
-                  tokenApprovalSourceTokenSymbol={sourceTokenSymbol}
-                  onTokenApprovalClick={onFeeCardTokenApprovalClick}
-                  metaMaskFee={String(metaMaskFee)}
-                  numberOfQuotes={Object.values(quotes).length}
-                  onQuotesClick={() => {
-                    allAvailableQuotesOpened();
-                    setSelectQuotePopoverShown(true);
-                  }}
-                  chainId={chainId}
-                  isBestQuote={isBestQuote}
-                  supportsEIP1559V2={supportsEIP1559V2}
-                  networkAndAccountSupports1559={networkAndAccountSupports1559}
-                  maxPriorityFeePerGasDecGWEI={hexWEIToDecGWEI(
-                    maxPriorityFeePerGas,
-                  )}
-                  maxFeePerGasDecGWEI={hexWEIToDecGWEI(maxFeePerGas)}
-                  smartTransactionsEnabled={currentSmartTransactionsEnabled}
-                  smartTransactionsOptInStatus={smartTransactionsOptInStatus}
-                />
-              </div>
-            )}
-          </div>
-          <SwapsFooter
-            onSubmit={() => {
-              setSubmitClicked(true);
-              if (!balanceError) {
-                if (
-                  currentSmartTransactionsEnabled &&
-                  smartTransactionsOptInStatus &&
-                  smartTransactionEstimatedGas?.txData
-                ) {
-                  dispatch(
-                    signAndSendSwapsSmartTransaction({
-                      unsignedTransaction,
-                      metaMetricsEvent,
-                      history,
-                    }),
-                  );
-                } else {
-                  dispatch(signAndSendTransactions(history, metaMetricsEvent));
-                }
-              } else if (destinationToken.symbol === defaultSwapsToken.symbol) {
-                history.push(DEFAULT_ROUTE);
-              } else {
-                history.push(`${ASSET_ROUTE}/${destinationToken.address}`);
+    <div className="view-quote">
+      <div
+        className={classnames('view-quote__content', {
+          'view-quote__content_modal': disableSubmissionDueToPriceWarning,
+        })}
+      >
+        {
+          /* istanbul ignore next */
+          selectQuotePopoverShown && (
+            <SelectQuotePopover
+              quoteDataRows={renderablePopoverData}
+              onClose={() => setSelectQuotePopoverShown(false)}
+              onSubmit={(aggId) => dispatch(swapsQuoteSelected(aggId))}
+              swapToSymbol={destinationTokenSymbol}
+              initialAggId={usedQuote.aggregator}
+              onQuoteDetailsIsOpened={trackQuoteDetailsOpened}
+              hideEstimatedGasFee={
+                smartTransactionsEnabled && smartTransactionsOptInStatus
               }
-            }}
-            submitText={
-              currentSmartTransactionsEnabled &&
-              smartTransactionsOptInStatus &&
-              swapsSTXLoading
-                ? t('preparingSwap')
-                : t('swap')
-            }
-            hideCancel
-            disabled={
-              submitClicked ||
-              balanceError ||
-              tokenBalanceUnavailable ||
-              disableSubmissionDueToPriceWarning ||
-              (networkAndAccountSupports1559 &&
-                baseAndPriorityFeePerGas === undefined) ||
-              (!networkAndAccountSupports1559 &&
-                (gasPrice === null || gasPrice === undefined)) ||
-              (currentSmartTransactionsEnabled && currentSmartTransactionsError)
-            }
-            className={isShowingWarning && 'view-quote__thin-swaps-footer'}
-            showTopBorder
+            />
+          )
+        }
+
+        <div
+          className={classnames('view-quote__warning-wrapper', {
+            'view-quote__warning-wrapper--thin': !isShowingWarning,
+          })}
+        >
+          {viewQuotePriceDifferenceComponent}
+          {(showInsufficientWarning || tokenBalanceUnavailable) && (
+            <ActionableMessage
+              message={actionableBalanceErrorMessage}
+              onClose={
+                /* istanbul ignore next */
+                () => setWarningHidden(true)
+              }
+            />
+          )}
+        </div>
+        <div className="view-quote__countdown-timer-container">
+          <CountdownTimer
+            timeStarted={quotesLastFetched}
+            warningTime="0:10"
+            labelKey="swapNewQuoteIn"
           />
         </div>
-      </TransactionModalContextProvider>
-    </GasFeeContextProvider>
+        <MainQuoteSummary
+          sourceValue={calcTokenValue(sourceTokenValue, sourceTokenDecimals)}
+          sourceDecimals={sourceTokenDecimals}
+          sourceSymbol={sourceTokenSymbol}
+          destinationValue={calcTokenValue(
+            destinationTokenValue,
+            destinationTokenDecimals,
+          )}
+          destinationDecimals={destinationTokenDecimals}
+          destinationSymbol={destinationTokenSymbol}
+          sourceIconUrl={sourceTokenIconUrl}
+          destinationIconUrl={destinationIconUrl}
+        />
+        {currentSmartTransactionsEnabled &&
+          smartTransactionsOptInStatus &&
+          !smartTransactionFees?.tradeTxFees &&
+          !showInsufficientWarning && (
+            <Box marginTop={0} marginBottom={10}>
+              <PulseLoader />
+            </Box>
+          )}
+        {(!currentSmartTransactionsEnabled ||
+          !smartTransactionsOptInStatus ||
+          smartTransactionFees?.tradeTxFees) && (
+          <div
+            className={classnames('view-quote__fee-card-container', {
+              'view-quote__fee-card-container--three-rows':
+                approveTxParams && (!balanceError || warningHidden),
+            })}
+          >
+            <FeeCard
+              primaryFee={{
+                fee: feeInEth,
+                maxFee: maxFeeInEth,
+              }}
+              secondaryFee={{
+                fee: feeInFiat,
+                maxFee: maxFeeInFiat,
+              }}
+              hideTokenApprovalRow={
+                !approveTxParams || (balanceError && !warningHidden)
+              }
+              tokenApprovalSourceTokenSymbol={sourceTokenSymbol}
+              onTokenApprovalClick={onFeeCardTokenApprovalClick}
+              metaMaskFee={String(metaMaskFee)}
+              numberOfQuotes={Object.values(quotes).length}
+              onQuotesClick={
+                /* istanbul ignore next */
+                () => {
+                  trackAllAvailableQuotesOpened();
+                  setSelectQuotePopoverShown(true);
+                }
+              }
+              chainId={chainId}
+              isBestQuote={isBestQuote}
+              maxPriorityFeePerGasDecGWEI={hexWEIToDecGWEI(
+                maxPriorityFeePerGas,
+              )}
+              maxFeePerGasDecGWEI={hexWEIToDecGWEI(maxFeePerGas)}
+            />
+          </div>
+        )}
+      </div>
+      <SwapsFooter
+        onSubmit={
+          /* istanbul ignore next */ () => {
+            setSubmitClicked(true);
+            if (!balanceError) {
+              if (
+                currentSmartTransactionsEnabled &&
+                smartTransactionsOptInStatus &&
+                smartTransactionFees?.tradeTxFees
+              ) {
+                dispatch(
+                  signAndSendSwapsSmartTransaction({
+                    unsignedTransaction,
+                    trackEvent,
+                    history,
+                    additionalTrackingParams,
+                  }),
+                );
+              } else {
+                dispatch(
+                  signAndSendTransactions(
+                    history,
+                    trackEvent,
+                    additionalTrackingParams,
+                  ),
+                );
+              }
+            } else if (destinationToken.symbol === defaultSwapsToken.symbol) {
+              history.push(DEFAULT_ROUTE);
+            } else {
+              history.push(`${ASSET_ROUTE}/${destinationToken.address}`);
+            }
+          }
+        }
+        submitText={
+          currentSmartTransactionsEnabled &&
+          smartTransactionsOptInStatus &&
+          swapsSTXLoading
+            ? t('preparingSwap')
+            : t('swap')
+        }
+        hideCancel
+        disabled={isSwapButtonDisabled}
+        className={isShowingWarning ? 'view-quote__thin-swaps-footer' : ''}
+        showTopBorder
+      />
+    </div>
   );
 }

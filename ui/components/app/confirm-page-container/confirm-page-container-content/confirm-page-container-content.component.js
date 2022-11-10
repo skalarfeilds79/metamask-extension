@@ -9,8 +9,7 @@ import ErrorMessage from '../../../ui/error-message';
 import { INSUFFICIENT_FUNDS_ERROR_KEY } from '../../../../helpers/constants/error-keys';
 import Typography from '../../../ui/typography';
 import { TYPOGRAPHY } from '../../../../helpers/constants/design-system';
-import { TRANSACTION_TYPES } from '../../../../../shared/constants/transaction';
-import { MAINNET_CHAIN_ID } from '../../../../../shared/constants/network';
+import DepositPopover from '../../deposit-popover/deposit-popover';
 
 import { ConfirmPageContainerSummary, ConfirmPageContainerWarning } from '.';
 
@@ -24,9 +23,11 @@ export default class ConfirmPageContainerContent extends Component {
     dataComponent: PropTypes.node,
     dataHexComponent: PropTypes.node,
     detailsComponent: PropTypes.node,
+    ///: BEGIN:ONLY_INCLUDE_IN(flask)
+    insightComponent: PropTypes.node,
+    ///: END:ONLY_INCLUDE_IN
     errorKey: PropTypes.string,
     errorMessage: PropTypes.string,
-    hasSimulationError: PropTypes.bool,
     hideSubtitle: PropTypes.bool,
     tokenAddress: PropTypes.string,
     nonce: PropTypes.string,
@@ -42,35 +43,58 @@ export default class ConfirmPageContainerContent extends Component {
     onCancel: PropTypes.func,
     cancelText: PropTypes.string,
     onSubmit: PropTypes.func,
-    setUserAcknowledgedGasMissing: PropTypes.func,
     submitText: PropTypes.string,
     disabled: PropTypes.bool,
-    hideUserAcknowledgedGasMissing: PropTypes.bool,
     unapprovedTxCount: PropTypes.number,
     rejectNText: PropTypes.string,
     hideTitle: PropTypes.bool,
     supportsEIP1559V2: PropTypes.bool,
     hasTopBorder: PropTypes.bool,
-    currentTransaction: PropTypes.string,
     nativeCurrency: PropTypes.string,
     networkName: PropTypes.string,
-    showBuyModal: PropTypes.func,
     toAddress: PropTypes.string,
     transactionType: PropTypes.string,
+    isBuyableChain: PropTypes.bool,
+  };
+
+  state = {
+    setShowDepositPopover: false,
   };
 
   renderContent() {
     const { detailsComponent, dataComponent } = this.props;
 
+    ///: BEGIN:ONLY_INCLUDE_IN(flask)
+    const { insightComponent } = this.props;
+
+    if (insightComponent && (detailsComponent || dataComponent)) {
+      return this.renderTabs();
+    }
+    ///: END:ONLY_INCLUDE_IN
+
     if (detailsComponent && dataComponent) {
       return this.renderTabs();
     }
-    return detailsComponent || dataComponent;
+
+    return (
+      detailsComponent ||
+      ///: BEGIN:ONLY_INCLUDE_IN(flask)
+      insightComponent ||
+      ///: END:ONLY_INCLUDE_IN
+      dataComponent
+    );
   }
 
   renderTabs() {
     const { t } = this.context;
-    const { detailsComponent, dataComponent, dataHexComponent } = this.props;
+    const {
+      detailsComponent,
+      dataComponent,
+      dataHexComponent,
+      ///: BEGIN:ONLY_INCLUDE_IN(flask)
+      insightComponent,
+      ///: END:ONLY_INCLUDE_IN
+    } = this.props;
 
     return (
       <Tabs>
@@ -80,9 +104,11 @@ export default class ConfirmPageContainerContent extends Component {
         >
           {detailsComponent}
         </Tab>
-        <Tab className="confirm-page-container-content__tab" name={t('data')}>
-          {dataComponent}
-        </Tab>
+        {dataComponent && (
+          <Tab className="confirm-page-container-content__tab" name={t('data')}>
+            {dataComponent}
+          </Tab>
+        )}
         {dataHexComponent && (
           <Tab
             className="confirm-page-container-content__tab"
@@ -91,6 +117,12 @@ export default class ConfirmPageContainerContent extends Component {
             {dataHexComponent}
           </Tab>
         )}
+
+        {
+          ///: BEGIN:ONLY_INCLUDE_IN(flask)
+          insightComponent
+          ///: END:ONLY_INCLUDE_IN
+        }
       </Tabs>
     );
   }
@@ -100,7 +132,6 @@ export default class ConfirmPageContainerContent extends Component {
       action,
       errorKey,
       errorMessage,
-      hasSimulationError,
       title,
       image,
       titleComponent,
@@ -122,32 +153,23 @@ export default class ConfirmPageContainerContent extends Component {
       origin,
       ethGasPriceWarning,
       hideTitle,
-      setUserAcknowledgedGasMissing,
-      hideUserAcknowledgedGasMissing,
       supportsEIP1559V2,
       hasTopBorder,
-      currentTransaction,
       nativeCurrency,
       networkName,
-      showBuyModal,
       toAddress,
       transactionType,
+      isBuyableChain,
     } = this.props;
 
-    const primaryAction = hideUserAcknowledgedGasMissing
-      ? null
-      : {
-          label: this.context.t('tryAnywayOption'),
-          onClick: setUserAcknowledgedGasMissing,
-        };
     const { t } = this.context;
 
     const showInsuffienctFundsError =
       supportsEIP1559V2 &&
-      !hasSimulationError &&
       (errorKey || errorMessage) &&
-      errorKey === INSUFFICIENT_FUNDS_ERROR_KEY &&
-      currentTransaction.type === TRANSACTION_TYPES.SIMPLE_SEND;
+      errorKey === INSUFFICIENT_FUNDS_ERROR_KEY;
+
+    const { setShowDepositPopover } = this.state;
 
     return (
       <div
@@ -158,15 +180,6 @@ export default class ConfirmPageContainerContent extends Component {
         {warning ? <ConfirmPageContainerWarning warning={warning} /> : null}
         {ethGasPriceWarning && (
           <ConfirmPageContainerWarning warning={ethGasPriceWarning} />
-        )}
-        {hasSimulationError && (
-          <div className="confirm-page-container-content__error-container">
-            <ActionableMessage
-              type="danger"
-              primaryAction={primaryAction}
-              message={t('simulationErrorMessage')}
-            />
-          </div>
         )}
         <ConfirmPageContainerSummary
           className={classnames({
@@ -187,55 +200,54 @@ export default class ConfirmPageContainerContent extends Component {
           transactionType={transactionType}
         />
         {this.renderContent()}
-        {!supportsEIP1559V2 &&
-          !hasSimulationError &&
-          (errorKey || errorMessage) &&
-          currentTransaction.type !== TRANSACTION_TYPES.SIMPLE_SEND && (
-            <div className="confirm-page-container-content__error-container">
-              <ErrorMessage errorMessage={errorMessage} errorKey={errorKey} />
-            </div>
-          )}
-        {showInsuffienctFundsError && (
+        {!supportsEIP1559V2 && (errorKey || errorMessage) && (
           <div className="confirm-page-container-content__error-container">
-            {currentTransaction.chainId === MAINNET_CHAIN_ID ? (
-              <ActionableMessage
-                className="actionable-message--warning"
-                message={
-                  <Typography variant={TYPOGRAPHY.H7} align="left">
-                    {t('insufficientCurrency', [nativeCurrency, networkName])}
-                    <Button
-                      key="link"
-                      type="secondary"
-                      className="confirm-page-container-content__link"
-                      onClick={showBuyModal}
-                    >
-                      {t('buyEth')}
-                    </Button>
-
-                    {t('orDeposit')}
-                  </Typography>
-                }
-                useIcon
-                iconFillColor="#d73a49"
-                type="danger"
-              />
-            ) : (
-              <ActionableMessage
-                className="actionable-message--warning"
-                message={
-                  <Typography variant={TYPOGRAPHY.H7} align="left">
-                    {t('insufficientCurrency', [nativeCurrency, networkName])}
-                    {t('buyOther', [nativeCurrency])}
-                  </Typography>
-                }
-                useIcon
-                iconFillColor="#d73a49"
-                type="danger"
-              />
-            )}
+            <ErrorMessage errorMessage={errorMessage} errorKey={errorKey} />
           </div>
         )}
+        {showInsuffienctFundsError && (
+          <div className="confirm-page-container-content__error-container">
+            <ActionableMessage
+              className="actionable-message--warning"
+              message={
+                isBuyableChain ? (
+                  <Typography variant={TYPOGRAPHY.H7} align="left">
+                    {t('insufficientCurrencyBuyOrDeposit', [
+                      nativeCurrency,
+                      networkName,
 
+                      <Button
+                        type="inline"
+                        className="confirm-page-container-content__link"
+                        onClick={() =>
+                          this.setState({ setShowDepositPopover: true })
+                        }
+                        key={`${nativeCurrency}-buy-button`}
+                      >
+                        {t('buyAsset', [nativeCurrency])}
+                      </Button>,
+                    ])}
+                  </Typography>
+                ) : (
+                  <Typography variant={TYPOGRAPHY.H7} align="left">
+                    {t('insufficientCurrencyDeposit', [
+                      nativeCurrency,
+                      networkName,
+                    ])}
+                  </Typography>
+                )
+              }
+              useIcon
+              iconFillColor="var(--color-error-default)"
+              type="danger"
+            />
+          </div>
+        )}
+        {setShowDepositPopover && (
+          <DepositPopover
+            onClose={() => this.setState({ setShowDepositPopover: false })}
+          />
+        )}
         <PageContainerFooter
           onCancel={onCancel}
           cancelText={cancelText}

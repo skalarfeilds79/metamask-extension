@@ -8,9 +8,6 @@
   "about": {
     "message": "Teave"
   },
-  "acceleratingATransaction": {
-    "message": "* Tehingu kiirendamine kõrgemate gaasihindadega suurendab võimalust kiiremaks võrgus töötlemiseks, kuid see ei ole alati tagatud."
-  },
   "accessingYourCamera": {
     "message": "Kaamerale ligipääs..."
   },
@@ -43,12 +40,6 @@
   },
   "addSuggestedTokens": {
     "message": "Lisa soovitatud lube"
-  },
-  "addToAddressBook": {
-    "message": "Lisage aadressiraamatusse"
-  },
-  "addToAddressBookModalPlaceholder": {
-    "message": "nt John D."
   },
   "addToken": {
     "message": "Lisage luba"
@@ -143,10 +134,10 @@
     "message": "Teie lehitsejat ei toetata..."
   },
   "buyWithWyre": {
-    "message": "Ostke ETH-d Wyre'iga"
+    "message": "Ostke $1 -d Wyre'iga"
   },
   "buyWithWyreDescription": {
-    "message": "Wyre võimaldab kasutada krediitkaarti, et teha ETH sissemakse otse MetaMaski kontole."
+    "message": "Wyre võimaldab kasutada krediitkaarti, et teha $1 sissemakse otse MetaMaski kontole."
   },
   "bytes": {
     "message": "Baidid"
@@ -199,17 +190,8 @@
   "connectingToGoerli": {
     "message": "Ühendamine Goerli testvõrguga"
   },
-  "connectingToKovan": {
-    "message": "Ühendamine Kovani testvõrguga"
-  },
   "connectingToMainnet": {
     "message": "Ühenduse loomine peamise Etherumi võrguga"
-  },
-  "connectingToRinkeby": {
-    "message": "Ühendamine Rinkeby testvõrguga"
-  },
-  "connectingToRopsten": {
-    "message": "Ühendamine Ropsteni testvõrguga"
   },
   "continueToWyre": {
     "message": "Ava Wyre"
@@ -255,12 +237,6 @@
   },
   "custom": {
     "message": "Täpsemad"
-  },
-  "customGas": {
-    "message": "Gaasi kohandamine"
-  },
-  "customGasSubTitle": {
-    "message": "Tasu suurendamine võib töötlemisaegu vähendada, kuid see ei ole tagatud."
   },
   "customToken": {
     "message": "Kohandatud luba"
@@ -340,17 +316,11 @@
   "ensRegistrationError": {
     "message": "Tõrge ENS-i nime registreerimisel"
   },
-  "enterAnAlias": {
-    "message": "Sisestage alias"
-  },
   "enterPassword": {
     "message": "Sisestage parool"
   },
   "enterPasswordContinue": {
     "message": "Jätkamiseks sisestage parool"
-  },
-  "estimatedProcessingTimes": {
-    "message": "Eeldatavad töötlemisajad"
   },
   "ethereumPublicAddress": {
     "message": "Ethereumi avalik aadress"
@@ -508,9 +478,6 @@
   "knownAddressRecipient": {
     "message": "Teadaolev lepinguaadress."
   },
-  "kovan": {
-    "message": "Kovani testvõrk"
-  },
   "learnMore": {
     "message": "Lisateave"
   },
@@ -602,12 +569,6 @@
   },
   "newToMetaMask": {
     "message": "Pole MetaMaski varem kasutanud?"
-  },
-  "newTotal": {
-    "message": "Uus kogusumma"
-  },
-  "newTransactionFee": {
-    "message": "Uus vahendustasu"
   },
   "next": {
     "message": "Edasi"
@@ -767,12 +728,6 @@
   "revealSeedWordsWarningTitle": {
     "message": "ÄRGE jagage seda fraasi mitte kellegagi!"
   },
-  "rinkeby": {
-    "message": "Rinkeby katsevõrk"
-  },
-  "ropsten": {
-    "message": "Ropsteni testvõrk"
-  },
   "rpcUrl": {
     "message": "Uus RPC URL"
   },
@@ -806,14 +761,8 @@
   "securityAndPrivacy": {
     "message": "Turvalisus ja privaatsus"
   },
-  "seedPhrasePlaceholder": {
-    "message": "Eraldage iga sõna ühe tühikuga"
-  },
   "seedPhraseReq": {
     "message": "Seemnefraasid on 12 sõna pikad"
-  },
-  "selectAHigherGasFee": {
-    "message": "Valige suurem gaasihind, et kiirendada tehingu töötlemist.*"
   },
   "selectAnAccount": {
     "message": "Valige konto"
@@ -832,9 +781,6 @@
   },
   "send": {
     "message": "Saada"
-  },
-  "sendAmount": {
-    "message": "Saatke kogus"
   },
   "sendTokens": {
     "message": "Saada lube"
@@ -877,9 +823,6 @@
   },
   "signed": {
     "message": "Allkirjastatud"
-  },
-  "slow": {
-    "message": "Aeglane"
   },
   "somethingWentWrong": {
     "message": "Oih! Midagi läks valesti."

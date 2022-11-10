@@ -13,7 +13,7 @@
 }
 
 
-@media screen and (min-width: 1281px) {
+@include screen-lg-min {
   .first-view-main {
     width: 62vw;
   }
@@ -27,7 +27,7 @@
   max-width: initial;
 }
 
-@media only screen and (max-width: $break-small) {
+@include screen-sm-max {
   .import-account {
     margin: 24px;
     display: flex;
@@ -61,7 +61,7 @@
     @include Paragraph;
 
     margin-bottom: 18px;
-    color: var(--black);
+    color: var(--color-text-default);
     position: absolute;
     top: -25px;
   }
@@ -87,7 +87,7 @@
   &__error {
     @include H6;
 
-    color: var(--crimson);
+    color: var(--color-error-default);
     padding-top: 5px;
   }
 }

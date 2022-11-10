@@ -8,16 +8,22 @@
 
 .settings-page {
   position: relative;
-  background: var(--white);
+  background: var(--color-background-default);
   display: flex;
   flex-flow: column nowrap;
+
+  &__error-text {
+    @include H7;
+
+    color: var(--color-error-default);
+  }
 
   &__header {
     padding: 8px 24px 8px 24px;
     position: relative;
 
-    @media screen and (max-width: $break-small) {
-      background: var(--ui-1);
+    @include screen-sm-max {
+      background: var(--color-background-alternative);
     }
 
     &__title-container {
@@ -33,7 +39,7 @@
       &__close-button::after {
         content: '\00D7';
         font-size: 40px;
-        color: var(--ui-4);
+        color: var(--color-icon-default);
         cursor: pointer;
       }
 
@@ -42,7 +48,7 @@
 
         flex: 1 0 auto;
 
-        @media screen and (max-width: $break-small) {
+        @include screen-sm-max {
           text-overflow: ellipsis;
           overflow: hidden;
           white-space: nowrap;
@@ -52,25 +58,25 @@
     }
 
     &__search {
-      @media screen and (max-width: $break-small) {
+      @include screen-sm-max {
         position: relative;
       }
 
-      @media screen and (min-width: $break-large) {
+      @include screen-sm-min {
         position: absolute;
         right: 57px;
         top: 10px;
         width: 300px;
       }
 
-      @media screen and (min-width: $break-midpoint) {
+      @include screen-md-min {
         width: 400px;
       }
 
       &__list {
-        background: var(--ui-white);
+        background: var(--color-background-default);
         box-sizing: border-box;
-        box-shadow: 0 0 14px rgba(0, 0, 0, 0.18);
+        box-shadow: var(--shadow-size-sm) var(--color-shadow-default);
         border-radius: 6px;
         position: absolute;
         width: 100%;
@@ -78,7 +84,7 @@
 
         > div {
           &:hover {
-            background: var(--ui-1);
+            background: var(--color-background-alternative);
           }
         }
 
@@ -87,13 +93,13 @@
           display: grid;
           align-items: center;
           padding: 16px;
-          border-top: 1px solid var(--ui-2);
+          border-top: 1px solid var(--color-border-muted);
           cursor: pointer;
-          grid-template-columns: 16px minmax(20px, max-content) 8px auto;
+          grid-template-columns: 16px max-content 24px auto;
           gap: 8px;
 
           &__icon {
-            background: --ui-2;
+            background: var(--color-background-alternative);
             height: 15px;
             width: 15px;
             margin-right: 16px;
@@ -105,31 +111,16 @@
           &__no-matching {
             @include H6;
 
-            color: var(--ui-4);
-          }
-
-          &__tab-multiple-lines {
-            @media screen and (max-width: $break-small) {
-              width: 90px;
-            }
+            color: var(--color-icon-default);
           }
 
           &__section-multiple-lines {
-            @media screen and (max-width: $break-small) {
-              width: 170px;
+            @include screen-sm-max {
               margin-left: 10px;
             }
           }
 
           &__caret {
-            background-image: url('/images/caret-right.svg');
-            width: 8px;
-            height: 10px;
-            background-size: contain;
-            background-repeat: no-repeat;
-            background-position: center;
-            margin: 0 4px;
-
             [dir='rtl'] & {
               transform: rotate(180deg);
             }
@@ -139,7 +130,7 @@
             @include H6;
 
             display: inline;
-            color: var(--primary-blue);
+            color: var(--color-primary-default);
             margin-left: 3px;
           }
         }
@@ -152,14 +143,14 @@
     @include H4;
 
     padding: 16px 4px;
-    border-bottom: 1px solid var(--alto);
+    border-bottom: 1px solid var(--color-border-muted);
     margin-right: 24px;
     height: 72px;
     align-items: center;
     display: flex;
     flex-flow: row nowrap;
 
-    @media screen and (max-width: $break-small) {
+    @include screen-sm-max {
       display: none;
     }
   }
@@ -171,7 +162,7 @@
 
   &__subheader--link:hover {
     cursor: pointer;
-    color: var(--primary-blue);
+    color: var(--color-primary-default);
   }
 
   &__subheader--break {
@@ -180,13 +171,13 @@
 
   &__sub-header {
     height: 72px;
-    border-bottom: 1px solid #d8d8d8;
+    border-bottom: 1px solid var(--color-border-muted);
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 16px 0;
 
-    @media screen and (max-width: $break-small) {
+    @include screen-sm-max {
       height: 69px;
       position: relative;
       text-align: center;
@@ -196,7 +187,7 @@
   &__sub-header-text {
     @include H4;
 
-    @media screen and (max-width: $break-small) {
+    @include screen-sm-max {
       @include H5;
 
       width: 100%;
@@ -206,19 +197,13 @@
   &__back-button {
     display: none;
 
-    @media screen and (max-width: $break-small) {
+    @include screen-sm-max {
       display: block;
-      background-image: url('/images/caret-left-black.svg');
-      width: 18px;
-      height: 18px;
-      opacity: 0.5;
-      background-size: contain;
-      background-repeat: no-repeat;
-      background-position: center;
-      margin-right: 16px;
+      margin-right: 8px;
       cursor: pointer;
 
       [dir='rtl'] & {
+        margin: 0 0 0 8px;
         transform: rotate(180deg);
       }
     }
@@ -229,21 +214,21 @@
     flex-flow: row nowrap;
     height: 100%;
     overflow: auto;
-    border-top: 1px solid #d8d8d8;
+    border-top: 1px solid var(--color-border-muted);
 
     &__tabs {
       display: flex;
       flex-direction: column;
       flex: 1 1 auto;
 
-      @media screen and (min-width: $break-large) {
+      @include screen-sm-min {
         flex: 0 0 40%;
         max-width: 197px;
         padding-top: 13px;
       }
 
       .tab-bar__tab {
-        @media screen and (min-width: $break-large) {
+        @include screen-sm-min {
           max-height: 50px;
         }
       }
@@ -255,7 +240,7 @@
       display: flex;
       flex-flow: column;
 
-      @media screen and (max-width: $break-small) {
+      @include screen-sm-max {
         display: none;
       }
     }
@@ -264,7 +249,7 @@
   &__body {
     padding: 12px 24px;
 
-    @media screen and (min-width: $break-large) {
+    @include screen-sm-min {
       padding: 12px;
     }
   }
@@ -291,7 +276,7 @@
     flex-direction: column;
     margin-bottom: 20px;
 
-    @media screen and (max-width: $break-small) {
+    @include screen-sm-max {
       height: initial;
       padding: 5px 0;
     }
@@ -319,13 +304,15 @@
         flex-direction: row;
         align-items: center;
         justify-content: space-between;
+        background: unset;
+        border: 1px solid transparent;
 
         &__icon {
           &--active {
             height: 40px;
             width: 40px;
             border-radius: 40px;
-            border: 2px solid #037dd6;
+            border: 2px solid var(--color-primary-default);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -339,7 +326,7 @@
 
       margin-top: 8px;
       margin-bottom: 12px;
-      color: var(--dusty-gray);
+      color: var(--color-text-default);
     }
   }
 
@@ -350,11 +337,11 @@
   &__content-description {
     @include H6;
 
-    color: var(--dusty-gray);
+    color: var(--color-text-default);
     padding-top: 5px;
 
     a {
-      color: var(--Blue-500);
+      color: var(--color-primary-default);
     }
   }
 
@@ -363,10 +350,14 @@
     display: flex;
     flex-direction: column;
 
-    @media screen and (max-width: $break-small) {
+    @include screen-sm-max {
       max-width: 100%;
       width: 100%;
     }
+  }
+
+  &__button {
+    cursor: pointer;
   }
 
   &__copy-icon {
@@ -399,13 +390,13 @@
     .settings-page {
       &__content {
         &__tabs {
-          @media screen and (max-width: $break-small) {
+          @include screen-sm-max {
             display: none;
           }
         }
 
         &__modules {
-          @media screen and (max-width: $break-small) {
+          @include screen-sm-max {
             display: block;
           }
         }

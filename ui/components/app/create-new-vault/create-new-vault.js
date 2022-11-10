@@ -1,7 +1,6 @@
-import React, { useCallback, useContext, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import PropTypes from 'prop-types';
 import { useI18nContext } from '../../../hooks/useI18nContext';
-import { MetaMetricsContext } from '../../../contexts/metametrics';
 import TextField from '../../ui/text-field';
 import Button from '../../ui/button';
 import CheckBox from '../../ui/check-box';
@@ -22,7 +21,6 @@ export default function CreateNewVault({
   const [termsChecked, setTermsChecked] = useState(false);
 
   const t = useI18nContext();
-  const metricsEvent = useContext(MetaMetricsContext);
 
   const onPasswordChange = useCallback(
     (newPassword) => {
@@ -82,16 +80,8 @@ export default function CreateNewVault({
   );
 
   const toggleTermsCheck = useCallback(() => {
-    metricsEvent({
-      eventOpts: {
-        category: 'Onboarding',
-        action: 'Import Seed Phrase',
-        name: 'Check ToS',
-      },
-    });
-
     setTermsChecked((currentTermsChecked) => !currentTermsChecked);
-  }, [metricsEvent]);
+  }, []);
 
   const termsOfUse = t('acceptTermsOfUse', [
     <a
@@ -107,31 +97,31 @@ export default function CreateNewVault({
 
   return (
     <form className="create-new-vault__form" onSubmit={onImport}>
-      <div className="create-new-vault__srp-section">
-        <SrpInput onChange={setSeedPhrase} />
+      <SrpInput onChange={setSeedPhrase} srpText={t('secretRecoveryPhrase')} />
+      <div className="create-new-vault__create-password">
+        <TextField
+          id="password"
+          label={t('newPassword')}
+          type="password"
+          value={password}
+          onChange={(event) => onPasswordChange(event.target.value)}
+          error={passwordError}
+          autoComplete="new-password"
+          margin="normal"
+          largeLabel
+        />
+        <TextField
+          id="confirm-password"
+          label={t('confirmPassword')}
+          type="password"
+          value={confirmPassword}
+          onChange={(event) => onConfirmPasswordChange(event.target.value)}
+          error={confirmPasswordError}
+          autoComplete="new-password"
+          margin="normal"
+          largeLabel
+        />
       </div>
-      <TextField
-        id="password"
-        label={t('newPassword')}
-        type="password"
-        value={password}
-        onChange={(event) => onPasswordChange(event.target.value)}
-        error={passwordError}
-        autoComplete="new-password"
-        margin="normal"
-        largeLabel
-      />
-      <TextField
-        id="confirm-password"
-        label={t('confirmPassword')}
-        type="password"
-        value={confirmPassword}
-        onChange={(event) => onConfirmPasswordChange(event.target.value)}
-        error={confirmPasswordError}
-        autoComplete="new-password"
-        margin="normal"
-        largeLabel
-      />
       {includeTerms ? (
         <div className="create-new-vault__terms">
           <CheckBox
@@ -144,7 +134,7 @@ export default function CreateNewVault({
             className="create-new-vault__terms-label"
             htmlFor="create-new-vault__terms-checkbox"
           >
-            <Typography tag="span">{termsOfUse}</Typography>
+            <Typography as="span">{termsOfUse}</Typography>
           </label>
         </div>
       ) : null}
