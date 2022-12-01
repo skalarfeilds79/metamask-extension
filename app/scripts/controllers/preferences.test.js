@@ -1,9 +1,7 @@
 import { strict as assert } from 'assert';
 import sinon from 'sinon';
-import {
-  ControllerMessenger,
-  TokenListController,
-} from '@metamask/controllers';
+import { ControllerMessenger } from '@metamask/base-controller';
+import { TokenListController } from '@metamask/assets-controllers';
 import { CHAIN_IDS } from '../../../shared/constants/network';
 import PreferencesController from './preferences';
 import NetworkController from './network';
@@ -308,21 +306,21 @@ describe('preferences controller', function () {
     });
   });
 
-  describe('setUseCollectibleDetection', function () {
+  describe('setUseNftDetection', function () {
     it('should default to false', function () {
       const state = preferencesController.store.getState();
-      assert.equal(state.useCollectibleDetection, false);
+      assert.equal(state.useNftDetection, false);
     });
 
-    it('should set the useCollectibleDetection property in state', function () {
+    it('should set the useNftDetection property in state', function () {
       assert.equal(
-        preferencesController.store.getState().useCollectibleDetection,
+        preferencesController.store.getState().useNftDetection,
         false,
       );
       preferencesController.setOpenSeaEnabled(true);
-      preferencesController.setUseCollectibleDetection(true);
+      preferencesController.setUseNftDetection(true);
       assert.equal(
-        preferencesController.store.getState().useCollectibleDetection,
+        preferencesController.store.getState().useNftDetection,
         true,
       );
     });
